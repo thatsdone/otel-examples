@@ -20,6 +20,7 @@ import time
 import datetime
 import argparse
 import requests
+import re
 
 def get_traceparent(span):
     span_ctx = span.get_span_context()
@@ -40,6 +41,7 @@ if __name__ == "__main__":
     parser.add_argument('--timeout', type=int, default=60)
     parser.add_argument('--endpoint', default=None,
                         help='OTLP Collector Endpoint (e.g. http://localhost:4317)')
+    parser.add_argument('--otlp_protocol', default='grpc')
     parser.add_argument('--console', action='store_true')
     parser.add_argument('--forward_url', default=None)
     parser.add_argument('--enable_otel', action='store_true')
@@ -59,8 +61,18 @@ if __name__ == "__main__":
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
         from opentelemetry.sdk.trace.export import ConsoleSpanExporter
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-        from opentelemetry.exporter.jaeger.proto.grpc import JaegerExporter
+        if args.otlp_protocol == 'grpc':
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        elif args.otlp_protocol == 'http/protobuf':
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+            if not re.match('.+/v1/traces$', args.endpoint):
+                args.endpoint += '/v1/traces'
+                if args.debug:
+                    print('DEBUG: Appending /v1/traces to endpoint.', args.endpoint)
+        else:
+            print('Unknown otlp_protocol: %s' % (args.otlp_protocol))
+            sys.exit()
+        #from opentelemetry.exporter.jaeger.proto.grpc import JaegerExporter
         #from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
         if args.service_name:
@@ -80,7 +92,12 @@ if __name__ == "__main__":
             print('Warning: No exporter specified regardless of OTEL enabled.')
 
         if args.endpoint and not args.jaeger:
-            otlp_exporter = OTLPSpanExporter(endpoint=args.endpoint, insecure=True)
+            otlp_exporter = None
+            if args.otlp_protocol == 'grpc':
+                otlp_exporter = OTLPSpanExporter(endpoint=args.endpoint, insecure=True)
+            else:
+                otlp_exporter = OTLPSpanExporter(endpoint=args.endpoint)
+            otlp_exporter = OTLPSpanExporter(endpoint=args.endpoint)
             otlp_processor = BatchSpanProcessor(otlp_exporter)
             trace.get_tracer_provider().add_span_processor(otlp_processor)
         if args.endpoint and args.jaeger:

@@ -18,6 +18,7 @@ import sys
 import time
 import datetime
 import argparse
+import re
 #import requests
 from http.server import BaseHTTPRequestHandler
 from http.server import HTTPServer
@@ -102,6 +103,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='otelsrv.py')
     parser.add_argument('--endpoint', default=None,
                         help='OTLP Collector Endpoint (e.g. http://localhost:4317)')
+    parser.add_argument('--otlp_protocol', default='grpc')
     parser.add_argument('--console', action='store_true')
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--bind_address', default='0.0.0.0')
@@ -120,14 +122,27 @@ if __name__ == "__main__":
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
         from opentelemetry.sdk.trace.export import ConsoleSpanExporter
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        if args.otlp_protocol == 'grpc':
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        elif args.otlp_protocol == 'http/protobuf':
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+            if not re.match('.+/v1/traces$', args.endpoint):
+                args.endpoint += '/v1/traces'
+                if args.debug:
+                    print('DEBUG: Appending /v1/traces to endpoint.', args.endpoint)
+        else:
+            print('Unknown otlp_protocol: %s' % (args.otlp_protocol))
+            sys.exit()
         from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
         resource = Resource(attributes={'service.name': sys.argv[0]})
         provider = TracerProvider(resource=resource)
         trace.set_tracer_provider(provider)
         tracer = trace.get_tracer(sys.argv[0])
         if args.endpoint:
-            otlp_exporter = OTLPSpanExporter(endpoint=args.endpoint, insecure=True)
+            if args.otlp_protocol == 'grpc':
+                otlp_exporter = OTLPSpanExporter(endpoint=args.endpoint, insecure=True)
+            else:
+                otlp_exporter = OTLPSpanExporter(endpoint=args.endpoint)
             otlp_processor = BatchSpanProcessor(otlp_exporter)
             trace.get_tracer_provider().add_span_processor(otlp_processor)
         if args.console:
